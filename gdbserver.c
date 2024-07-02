@@ -79,7 +79,73 @@ struct reg_struct regs_map[] = {
 #include <sys/reg.h>
 
 #define SZ 8
-#define FEATURE_STR "l<target version=\"1.0\"><architecture>i386:x86-64</architecture></target>"
+#define FEATURE_STR "l<?xml version=\"1.0\"?>\
+<!DOCTYPE target SYSTEM \"gdb-target.dtd\">\
+<target>\
+    <architecture>i386:x86-64</architecture>\
+    <feature name=\"org.gnu.gdb.i386.core\">\
+  <flags id=\"i386_eflags\" size=\"4\">\
+    <field name=\"CF\" start=\"0\" end=\"0\"/>\
+    <field name=\"\" start=\"1\" end=\"1\"/>\
+    <field name=\"PF\" start=\"2\" end=\"2\"/>\
+    <field name=\"AF\" start=\"4\" end=\"4\"/>\
+    <field name=\"ZF\" start=\"6\" end=\"6\"/>\
+    <field name=\"SF\" start=\"7\" end=\"7\"/>\
+    <field name=\"TF\" start=\"8\" end=\"8\"/>\
+    <field name=\"IF\" start=\"9\" end=\"9\"/>\
+    <field name=\"DF\" start=\"10\" end=\"10\"/>\
+    <field name=\"OF\" start=\"11\" end=\"11\"/>\
+    <field name=\"NT\" start=\"14\" end=\"14\"/>\
+    <field name=\"RF\" start=\"16\" end=\"16\"/>\
+    <field name=\"VM\" start=\"17\" end=\"17\"/>\
+    <field name=\"AC\" start=\"18\" end=\"18\"/>\
+    <field name=\"VIF\" start=\"19\" end=\"19\"/>\
+    <field name=\"VIP\" start=\"20\" end=\"20\"/>\
+    <field name=\"ID\" start=\"21\" end=\"21\"/>\
+  </flags>\
+  <reg name=\"rax\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"rbx\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"rcx\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"rdx\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"rsi\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"rdi\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"rbp\" bitsize=\"64\" type=\"data_ptr\"/>\
+  <reg name=\"rsp\" bitsize=\"64\" type=\"data_ptr\"/>\
+  <reg name=\"r8\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"r9\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"r10\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"r11\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"r12\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"r13\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"r14\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"r15\" bitsize=\"64\" type=\"int64\"/>\
+  <reg name=\"rip\" bitsize=\"64\" type=\"code_ptr\"/>\
+  <reg name=\"eflags\" bitsize=\"32\" type=\"i386_eflags\"/>\
+  <reg name=\"cs\" bitsize=\"32\" type=\"int32\"/>\
+  <reg name=\"ss\" bitsize=\"32\" type=\"int32\"/>\
+  <reg name=\"ds\" bitsize=\"32\" type=\"int32\"/>\
+  <reg name=\"es\" bitsize=\"32\" type=\"int32\"/>\
+  <reg name=\"fs\" bitsize=\"32\" type=\"int32\"/>\
+  <reg name=\"gs\" bitsize=\"32\" type=\"int32\"/>\
+  <reg name=\"st0\" bitsize=\"80\" type=\"i387_ext\"/>\
+  <reg name=\"st1\" bitsize=\"80\" type=\"i387_ext\"/>\
+  <reg name=\"st2\" bitsize=\"80\" type=\"i387_ext\"/>\
+  <reg name=\"st3\" bitsize=\"80\" type=\"i387_ext\"/>\
+  <reg name=\"st4\" bitsize=\"80\" type=\"i387_ext\"/>\
+  <reg name=\"st5\" bitsize=\"80\" type=\"i387_ext\"/>\
+  <reg name=\"st6\" bitsize=\"80\" type=\"i387_ext\"/>\
+  <reg name=\"st7\" bitsize=\"80\" type=\"i387_ext\"/>\
+  <reg name=\"fctrl\" bitsize=\"32\" type=\"int\" group=\"float\"/>\
+  <reg name=\"fstat\" bitsize=\"32\" type=\"int\" group=\"float\"/>\
+  <reg name=\"ftag\" bitsize=\"32\" type=\"int\" group=\"float\"/>\
+  <reg name=\"fiseg\" bitsize=\"32\" type=\"int\" group=\"float\"/>\
+  <reg name=\"fioff\" bitsize=\"32\" type=\"int\" group=\"float\"/>\
+  <reg name=\"foseg\" bitsize=\"32\" type=\"int\" group=\"float\"/>\
+  <reg name=\"fooff\" bitsize=\"32\" type=\"int\" group=\"float\"/>\
+  <reg name=\"fop\" bitsize=\"32\" type=\"int\" group=\"float\"/>\
+</feature>\
+</target>"
+
 static uint8_t break_instr[] = {0xcc};
 
 #define PC RIP
@@ -285,6 +351,7 @@ struct debug_breakpoint_t
 
 uint8_t tmpbuf[0x20000];
 bool attach = false;
+bool NoAckMode = false;
 
 
 
@@ -474,6 +541,8 @@ void write_packet_bytes(const uint8_t *data, size_t num_bytes)
     uint8_t checksum;
     size_t i;
 
+    // fprintf(stderr, "> %s\n", data);
+
     write_data_raw((uint8_t *)"$", 1);
     for (i = 0, checksum = 0; i < num_bytes; ++i)
         checksum += data[i];
@@ -545,7 +614,8 @@ void read_packet()
 {
     while (!skip_to_packet_start())
         read_data_once();
-    write_data_raw((uint8_t *)"+", 1);
+    if (!NoAckMode)
+      write_data_raw((uint8_t *)"+", 1);
     write_flush();
 }
 
@@ -911,35 +981,35 @@ void process_query(char *payload)
     snprintf(tmpbuf, sizeof(tmpbuf), "QCp%02x.%02x", threads.curr->pid, threads.curr->tid);
     write_packet(tmpbuf);
   }
-  if (!strcmp(name, "Attached"))
+  else if (!strcmp(name, "Attached"))
   {
     if (attach)
       write_packet("1");
     else
       write_packet("0");
   }
-  if (!strcmp(name, "Offsets"))
+  else if (!strcmp(name, "Offsets"))
     write_packet("");
-  if (!strcmp(name, "Supported"))
+  else if (!strcmp(name, "Supported"))
     write_packet("PacketSize=8000;qXfer:features:read+;qXfer:auxv:read+;qXfer:exec-file:read+;multiprocess+");
-  if (!strcmp(name, "Symbol"))
+  else if (!strcmp(name, "Symbol"))
     write_packet("OK");
-  if (name == strstr(name, "ThreadExtraInfo"))
+  else if (name == strstr(name, "ThreadExtraInfo"))
   {
     args = payload;
     args = 1 + strchr(args, ',');
     write_packet("41414141");
   }
-  if (!strcmp(name, "TStatus"))
+  else if (!strcmp(name, "TStatus"))
     write_packet("");
-  if (!strcmp(name, "Xfer"))
+  else if (!strcmp(name, "Xfer"))
   {
     name = args;
     args = strchr(args, ':');
     *args++ = '\0';
     return process_xfer(name, args);
   }
-  if (!strcmp(name, "fThreadInfo"))
+  else if (!strcmp(name, "fThreadInfo"))
   {
     struct thread_id_t *ptr = threads.t;
     uint8_t pid_buf[20];
@@ -955,8 +1025,17 @@ void process_query(char *payload)
     tmpbuf[strlen(tmpbuf) - 1] = '\0';
     write_packet(tmpbuf);
   }
-  if (!strcmp(name, "sThreadInfo"))
+  else if (!strcmp(name, "sThreadInfo"))
     write_packet("l");
+  else if (!strcmp(name, "HostInfo"))
+  {
+    const char *triplet = "x86_64-unknown-linux-gnu";
+    mem2hex((void *)triplet, tmpbuf, strlen(triplet));
+    tmpbuf[strlen(tmpbuf) * 2] = '\0';
+    write_packet(tmpbuf);
+  }
+  else
+    write_packet("");
 }
 
 static int gdb_open_flags_to_system_flags(size_t flags)
@@ -991,6 +1070,28 @@ static int gdb_open_flags_to_system_flags(size_t flags)
   return ret;
 }
 
+void continue_threads()
+{
+  for (int i = 0, n = 0; i < THREAD_NUMBER && n < threads.len; i++)
+    if (threads.t[i].tid)
+    {
+      ptrace(PTRACE_CONT, threads.t[i].tid, NULL, NULL);
+      n++;
+    }
+  do
+  {
+    pid_t tid;
+    int stat;
+    enable_async_io();
+    tid = waitpid(-1, &stat, __WALL);
+    set_curr_thread(tid);
+    threads.curr->stat = stat;
+    disable_async_io();
+  } while (check_exit() || check_sigstop() || check_clone());
+  prepare_resume_reply(tmpbuf, true);
+  write_packet(tmpbuf);
+}
+
 void process_vpacket(char *payload)
 {
   const char *name;
@@ -1003,32 +1104,12 @@ void process_vpacket(char *payload)
   if (!strcmp("Cont", name))
   {
     if (args[0] == 'c')
-    {
-      for (int i = 0, n = 0; i < THREAD_NUMBER && n < threads.len; i++)
-        if (threads.t[i].tid)
-        {
-          ptrace(PTRACE_CONT, threads.t[i].tid, NULL, NULL);
-          n++;
-        }
-      do
-      {
-        pid_t tid;
-        int stat;
-        enable_async_io();
-        tid = waitpid(-1, &stat, __WALL);
-        set_curr_thread(tid);
-        threads.curr->stat = stat;
-        disable_async_io();
-      } while (check_exit() || check_sigstop() || check_clone());
-      prepare_resume_reply(tmpbuf, true);
-      write_packet(tmpbuf);
-    }
+      continue_threads();
     if (args[0] == 's')
     {
       assert(args[1] == ':');
       char *dot = strchr(args, '.');
-      assert(dot);
-      pid_t tid = strtol(dot + 1, NULL, 16);
+      pid_t tid = strtol(dot ? dot + 1 : args + 2, NULL, 16);
       set_curr_thread(tid);
       ptrace(PTRACE_SINGLESTEP, threads.curr->tid, NULL, NULL);
       waitpid(threads.curr->tid, &threads.curr->stat, __WALL);
@@ -1170,6 +1251,8 @@ void process_packet()
   char *payload = (char *)&inbuf[2];
   inbuf[packetend] = '\0';
 
+  // fprintf(stderr, "< %c%s\n", request, payload);
+
   uint8_t checksum = 0;
   uint8_t checksum_str[3];
   for (int i = 1; i < packetend; i++)
@@ -1178,6 +1261,12 @@ void process_packet()
 
   switch (request)
   {
+  case 'c':
+  {
+    assert(*payload == '\0');
+    continue_threads();
+    break;
+  }
   case 'D':
     for (int i = 0, n = 0; i < THREAD_NUMBER && n < threads.len; i++)
       if (threads.t[i].tid)
@@ -1204,8 +1293,7 @@ void process_packet()
     {
       pid_t tid;
       char *dot = strchr(payload, '.');
-      assert(dot);
-      tid = strtol(dot, NULL, 16);
+      tid = strtol(dot ? dot + 1 : payload, NULL, 16);
       if (tid > 0)
         set_curr_thread(tid);
     }
@@ -1257,6 +1345,11 @@ void process_packet()
   case 'p':
   {
     int i = strtol(payload, NULL, 16);
+    if (i == 0)
+    {
+      write_packet("");
+      break;
+    }
     if (i >= ARCH_REG_NUM && i != EXTRA_NUM)
     {
       write_packet("E01");
@@ -1298,6 +1391,15 @@ void process_packet()
   }
   case 'q':
     process_query(payload);
+    break;
+  case 'Q':
+    if (!strcmp(payload, "StartNoAckMode"))
+    {
+      NoAckMode = true;
+      write_packet("OK");
+    }
+    else
+      write_packet("");
     break;
   case 'v':
     process_vpacket(payload);

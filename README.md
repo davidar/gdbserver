@@ -27,5 +27,12 @@ $ ./gdbserver --attach 127.0.0.1:1234 23456
 
 Then you can run normal `gdb` (Only GDB 8.x is tested) and connect it by
 ```
+set debug remote 1
 target remote 127.0.0.1:1234
+```
+
+Or use `lldb` with
+```
+log enable gdb-remote packets
+gdb-remote localhost:1234
 ```
