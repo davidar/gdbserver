@@ -49,6 +49,7 @@ static uint8_t break_instr[] = {0xcc};
 #define EXTRA_NUM 41
 #define EXTRA_REG ORIG_EAX
 #define EXTRA_SIZE 4
+#define ARCH_TRIPLE "i386-pc-linux-gnu"
 
 typedef struct user_regs_struct regs_struct;
 
@@ -152,6 +153,7 @@ static uint8_t break_instr[] = {0xcc};
 #define EXTRA_NUM 57
 #define EXTRA_REG ORIG_RAX
 #define EXTRA_SIZE 8
+#define ARCH_TRIPLE "x86_64-pc-linux-gnu"
 
 typedef struct user_regs_struct regs_struct;
 
@@ -196,6 +198,7 @@ static uint8_t break_instr[] = {0xf0, 0x01, 0xf0, 0xe7};
 #define EXTRA_NUM 25
 #define EXTRA_REG 16
 #define EXTRA_SIZE 4
+#define ARCH_TRIPLE "arm-linux-gnueabihf"
 
 typedef struct user_regs regs_struct;
 
@@ -274,6 +277,7 @@ static uint8_t break_instr[] = {};
 #define EXTRA_NUM -1
 #define EXTRA_REG -1
 #define EXTRA_SIZE -1
+#define ARCH_TRIPLE "powerpc-linux-gnu"
 
 typedef struct pt_regs regs_struct;
 
@@ -956,15 +960,17 @@ void process_xfer(const char *name, char *args)
   *args++ = '\0';
   if (!strcmp(name, "features") && !strcmp(mode, "read"))
     write_packet(FEATURE_STR);
-  if (!strcmp(name, "auxv") && !strcmp(mode, "read"))
+  else if (!strcmp(name, "auxv") && !strcmp(mode, "read"))
     read_auxv();
-  if (!strcmp(name, "exec-file") && !strcmp(mode, "read"))
+  else if (!strcmp(name, "exec-file") && !strcmp(mode, "read"))
   {
     uint8_t proc_exe_path[20], file_path[256] = {'l'};
     sprintf(proc_exe_path, "/proc/%d/exe", threads.t[0].pid);
     realpath(proc_exe_path, file_path + 1);
     write_packet(file_path);
   }
+  else
+    write_packet("");
 }
 
 void process_query(char *payload)
@@ -1027,11 +1033,13 @@ void process_query(char *payload)
   }
   else if (!strcmp(name, "sThreadInfo"))
     write_packet("l");
-  else if (!strcmp(name, "HostInfo"))
+  else if (!strcmp(name, "ProcessInfo"))
   {
-    const char *triplet = "x86_64-unknown-linux-gnu";
-    mem2hex((void *)triplet, tmpbuf, strlen(triplet));
-    tmpbuf[strlen(tmpbuf) * 2] = '\0';
+    int n = sprintf(tmpbuf,
+      "pid:%x;parent-pid:%x;real-uid:%x;real-gid:%x;effective-uid:%x;effective-gid:%x;triple:",
+      threads.curr->pid, getpid(), getuid(), getgid(), getuid(), getgid());
+    mem2hex(ARCH_TRIPLE, tmpbuf + n, strlen(ARCH_TRIPLE));
+    sprintf(tmpbuf + n + strlen(ARCH_TRIPLE) * 2, ";ostype:linux;endian:little;ptrsize:%d;", SZ);
     write_packet(tmpbuf);
   }
   else
