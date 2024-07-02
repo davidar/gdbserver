@@ -1,22 +1,261 @@
+#include <arpa/inet.h>
+#include <assert.h>
+#include <assert.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <signal.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdlib.h>
 #include <string.h>
-#include <signal.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <dirent.h>
-#include <assert.h>
-#include <stdbool.h>
-#include <sys/wait.h>
-#include <sys/user.h>
+#include <string.h>
+#include <sys/poll.h>
 #include <sys/ptrace.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <unistd.h>
 
-#include "arch.h"
-#include "utils.h"
-#include "packets.h"
-#include "gdb_signals.h"
+
+
+struct reg_struct
+{
+    int idx;
+    int size;
+};
+
+#define ARCH_REG_NUM (sizeof(regs_map) / sizeof(struct reg_struct))
+
+#ifdef __i386__
+
+#include <sys/reg.h>
+
+#define SZ 4
+#define FEATURE_STR "l<target version=\"1.0\"><architecture>i386</architecture></target>"
+static uint8_t break_instr[] = {0xcc};
+
+#define PC EIP
+#define EXTRA_NUM 41
+#define EXTRA_REG ORIG_EAX
+#define EXTRA_SIZE 4
+
+typedef struct user_regs_struct regs_struct;
+
+// gdb/features/i386/32bit-core.c
+struct reg_struct regs_map[] = {
+    {EAX, 4},
+    {ECX, 4},
+    {EDX, 4},
+    {EBX, 4},
+    {UESP, 4},
+    {EBP, 4},
+    {ESI, 4},
+    {EDI, 4},
+    {EIP, 4},
+    {EFL, 4},
+    {CS, 4},
+    {SS, 4},
+    {DS, 4},
+    {ES, 4},
+    {FS, 4},
+    {GS, 4},
+};
+
+#endif /* __i386__ */
+
+#ifdef __x86_64__
+
+#include <sys/reg.h>
+
+#define SZ 8
+#define FEATURE_STR "l<target version=\"1.0\"><architecture>i386:x86-64</architecture></target>"
+static uint8_t break_instr[] = {0xcc};
+
+#define PC RIP
+#define EXTRA_NUM 57
+#define EXTRA_REG ORIG_RAX
+#define EXTRA_SIZE 8
+
+typedef struct user_regs_struct regs_struct;
+
+// gdb/features/i386/64bit-core.c
+struct reg_struct regs_map[] = {
+    {RAX, 8},
+    {RBX, 8},
+    {RCX, 8},
+    {RDX, 8},
+    {RSI, 8},
+    {RDI, 8},
+    {RBP, 8},
+    {RSP, 8},
+    {R8, 8},
+    {R9, 8},
+    {R10, 8},
+    {R11, 8},
+    {R12, 8},
+    {R13, 8},
+    {R14, 8},
+    {R15, 8},
+    {RIP, 8},
+    {EFLAGS, 4},
+    {CS, 4},
+    {SS, 4},
+    {DS, 4},
+    {ES, 4},
+    {FS, 4},
+    {GS, 4},
+};
+
+#endif /* __x86_64__ */
+
+#ifdef __arm__
+
+#define SZ 4
+#define FEATURE_STR "l<target version=\"1.0\"><architecture>arm</architecture></target>"
+
+static uint8_t break_instr[] = {0xf0, 0x01, 0xf0, 0xe7};
+
+#define PC 15
+#define EXTRA_NUM 25
+#define EXTRA_REG 16
+#define EXTRA_SIZE 4
+
+typedef struct user_regs regs_struct;
+
+struct reg_struct regs_map[] = {
+    {0, 4},
+    {1, 4},
+    {2, 4},
+    {3, 4},
+    {4, 4},
+    {5, 4},
+    {6, 4},
+    {7, 4},
+    {8, 4},
+    {9, 4},
+    {10, 4},
+    {11, 4},
+    {12, 4},
+    {13, 4},
+    {14, 4},
+    {15, 4},
+};
+
+#endif /* __arm__ */
+
+#ifdef __powerpc__
+
+#define SZ 4
+#define FEATURE_STR "l<target version=\"1.0\">\
+  <architecture>powerpc:common</architecture>\
+  <feature name=\"org.gnu.gdb.power.core\">\
+    <reg name=\"r0\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r1\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r2\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r3\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r4\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r5\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r6\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r7\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r8\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r9\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r10\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r11\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r12\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r13\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r14\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r15\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r16\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r17\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r18\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r19\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r20\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r21\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r22\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r23\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r24\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r25\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r26\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r27\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r28\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r29\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r30\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"r31\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"pc\" bitsize=\"32\" type=\"code_ptr\"/>\
+    <reg name=\"msr\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"orig_r3\" bitsize=\"32\" type=\"int\"/>\
+    <reg name=\"ctr\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"lr\" bitsize=\"32\" type=\"code_ptr\"/>\
+    <reg name=\"xer\" bitsize=\"32\" type=\"uint32\"/>\
+    <reg name=\"cr\" bitsize=\"32\" type=\"uint32\"/>\
+</feature>\
+</target>"
+
+static uint8_t break_instr[] = {};
+
+#define PC 32
+#define EXTRA_NUM -1
+#define EXTRA_REG -1
+#define EXTRA_SIZE -1
+
+typedef struct pt_regs regs_struct;
+
+struct reg_struct regs_map[] = {
+    {0, 4},
+    {1, 4},
+    {2, 4},
+    {3, 4},
+    {4, 4},
+    {5, 4},
+    {6, 4},
+    {7, 4},
+    {8, 4},
+    {9, 4},
+    {10, 4},
+    {11, 4},
+    {12, 4},
+    {13, 4},
+    {14, 4},
+    {15, 4},
+    {16, 4},
+    {17, 4},
+    {18, 4},
+    {19, 4},
+    {20, 4},
+    {21, 4},
+    {22, 4},
+    {23, 4},
+    {24, 4},
+    {25, 4},
+    {26, 4},
+    {27, 4},
+    {28, 4},
+    {29, 4},
+    {30, 4},
+    {31, 4},
+    {32, 4},
+    {33, 4},
+    {34, 4},
+    {35, 4},
+    {36, 4},
+    {37, 4},
+    {38, 4},
+};
+
+#endif /* __powerpc__ */
+
+
 
 size_t *entry_stack_ptr;
 
@@ -46,6 +285,446 @@ struct debug_breakpoint_t
 
 uint8_t tmpbuf[0x20000];
 bool attach = false;
+
+
+
+static const char hexchars[] = "0123456789abcdef";
+
+int hex(char ch)
+{
+    if ((ch >= 'a') && (ch <= 'f'))
+        return (ch - 'a' + 10);
+    if ((ch >= '0') && (ch <= '9'))
+        return (ch - '0');
+    if ((ch >= 'A') && (ch <= 'F'))
+        return (ch - 'A' + 10);
+    return (-1);
+}
+
+char *mem2hex(char *mem, char *buf, int count)
+{
+    unsigned char ch;
+    for (int i = 0; i < count; i++)
+    {
+        ch = *(mem++);
+        *buf++ = hexchars[ch >> 4];
+        *buf++ = hexchars[ch % 16];
+    }
+    *buf = 0;
+    return (buf);
+}
+
+char *hex2mem(char *buf, char *mem, int count)
+{
+    unsigned char ch;
+    for (int i = 0; i < count; i++)
+    {
+        ch = hex(*buf++) << 4;
+        ch = ch + hex(*buf++);
+        *(mem++) = ch;
+    }
+    return (mem);
+}
+
+int unescape(char *msg, int len)
+{
+    char *w = msg, *r = msg;
+    while (r - msg < len)
+    {
+        char v = *r++;
+        if (v != '}')
+        {
+            *w++ = v;
+            continue;
+        }
+        *w++ = *r++ ^ 0x20;
+    }
+    return w - msg;
+}
+
+
+
+// packet processing based on GdbConnection.cc in rr
+
+#define PACKET_BUF_SIZE 0x8000
+
+static const char INTERRUPT_CHAR = '\x03';
+
+struct packet_buf
+{
+    uint8_t buf[PACKET_BUF_SIZE];
+    int end;
+} in, out;
+
+int sock_fd;
+
+uint8_t *inbuf_get()
+{
+    return in.buf;
+}
+
+int inbuf_end()
+{
+    return in.end;
+}
+
+void pktbuf_insert(struct packet_buf *pkt, const uint8_t *buf, ssize_t len)
+{
+    if (pkt->end + len >= sizeof(pkt->buf))
+    {
+        puts("Packet buffer overflow");
+        exit(-2);
+    }
+    memcpy(pkt->buf + pkt->end, buf, len);
+    pkt->end += len;
+}
+
+void pktbuf_erase_head(struct packet_buf *pkt, ssize_t end)
+{
+    memmove(pkt->buf, pkt->buf + end, pkt->end - end);
+    pkt->end -= end;
+}
+
+void inbuf_erase_head(ssize_t end)
+{
+    pktbuf_erase_head(&in, end);
+}
+
+void pktbuf_clear(struct packet_buf *pkt)
+{
+    pkt->end = 0;
+}
+
+static bool poll_socket(int sock_fd, short events)
+{
+    struct pollfd pfd;
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = sock_fd;
+    pfd.events = events;
+
+    int ret = poll(&pfd, 1, -1);
+    if (ret < 0)
+    {
+        perror("poll() failed");
+        exit(-1);
+    }
+    return ret > 0;
+}
+
+static bool poll_incoming(int sock_fd)
+{
+    return poll_socket(sock_fd, POLLIN);
+}
+
+static void poll_outgoing(int sock_fd)
+{
+    poll_socket(sock_fd, POLLOUT);
+}
+
+void read_data_once()
+{
+    int ret;
+    ssize_t nread;
+    uint8_t buf[4096];
+
+    poll_incoming(sock_fd);
+    nread = read(sock_fd, buf, sizeof(buf));
+    if (nread <= 0)
+    {
+        puts("Connection closed");
+        exit(0);
+    }
+    pktbuf_insert(&in, buf, nread);
+}
+
+void write_flush()
+{
+    size_t write_index = 0;
+    while (write_index < out.end)
+    {
+        ssize_t nwritten;
+        poll_outgoing(sock_fd);
+        nwritten = write(sock_fd, out.buf + write_index, out.end - write_index);
+        if (nwritten < 0)
+        {
+            printf("Write error\n");
+            exit(-2);
+        }
+        write_index += nwritten;
+    }
+    pktbuf_clear(&out);
+}
+
+void write_data_raw(const uint8_t *data, ssize_t len)
+{
+    pktbuf_insert(&out, data, len);
+}
+
+void write_hex(unsigned long hex)
+{
+    char buf[32];
+    size_t len;
+
+    len = snprintf(buf, sizeof(buf) - 1, "%02lx", hex);
+    write_data_raw((uint8_t *)buf, len);
+}
+
+void write_packet_bytes(const uint8_t *data, size_t num_bytes)
+{
+    uint8_t checksum;
+    size_t i;
+
+    write_data_raw((uint8_t *)"$", 1);
+    for (i = 0, checksum = 0; i < num_bytes; ++i)
+        checksum += data[i];
+    write_data_raw((uint8_t *)data, num_bytes);
+    write_data_raw((uint8_t *)"#", 1);
+    write_hex(checksum);
+}
+
+void write_packet(const char *data)
+{
+    write_packet_bytes((const uint8_t *)data, strlen(data));
+}
+
+void write_binary_packet(const char *pfx, const uint8_t *data, ssize_t num_bytes)
+{
+    uint8_t *buf;
+    ssize_t pfx_num_chars = strlen(pfx);
+    ssize_t buf_num_bytes = 0;
+    int i;
+
+    buf = malloc(2 * num_bytes + pfx_num_chars);
+    memcpy(buf, pfx, pfx_num_chars);
+    buf_num_bytes += pfx_num_chars;
+
+    for (i = 0; i < num_bytes; ++i)
+    {
+        uint8_t b = data[i];
+        switch (b)
+        {
+        case '#':
+        case '$':
+        case '}':
+        case '*':
+            buf[buf_num_bytes++] = '}';
+            buf[buf_num_bytes++] = b ^ 0x20;
+            break;
+        default:
+            buf[buf_num_bytes++] = b;
+            break;
+        }
+    }
+    write_packet_bytes(buf, buf_num_bytes);
+    free(buf);
+}
+
+bool skip_to_packet_start()
+{
+    ssize_t end = -1;
+    for (size_t i = 0; i < in.end; ++i)
+        if (in.buf[i] == '$' || in.buf[i] == INTERRUPT_CHAR)
+        {
+            end = i;
+            break;
+        }
+
+    if (end < 0)
+    {
+        pktbuf_clear(&in);
+        return false;
+    }
+
+    pktbuf_erase_head(&in, end);
+    assert(1 <= in.end);
+    assert('$' == in.buf[0] || INTERRUPT_CHAR == in.buf[0]);
+    return true;
+}
+
+void read_packet()
+{
+    while (!skip_to_packet_start())
+        read_data_once();
+    write_data_raw((uint8_t *)"+", 1);
+    write_flush();
+}
+
+static int async_io_enabled;
+void (*request_interrupt)(void);
+
+static void enable_async_notification(int fd)
+{
+#if defined(F_SETFL) && defined(FASYNC)
+    int save_fcntl_flags;
+
+    save_fcntl_flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, save_fcntl_flags | FASYNC);
+#if defined(F_SETOWN)
+    fcntl(fd, F_SETOWN, getpid());
+#endif
+#endif
+}
+
+static void input_interrupt(int unused)
+{
+    if (async_io_enabled)
+    {
+        int nread;
+        char buf;
+        nread = read(sock_fd, &buf, 1);
+        assert(nread == 1 && buf == INTERRUPT_CHAR);
+        request_interrupt();
+    }
+}
+
+static void block_unblock_async_io(int block)
+{
+    sigset_t sigio_set;
+    sigemptyset(&sigio_set);
+    sigaddset(&sigio_set, SIGIO);
+    sigprocmask(block ? SIG_BLOCK : SIG_UNBLOCK, &sigio_set, NULL);
+}
+
+void enable_async_io(void)
+{
+    if (async_io_enabled)
+        return;
+    block_unblock_async_io(0);
+    async_io_enabled = 1;
+}
+
+void disable_async_io(void)
+{
+    if (!async_io_enabled)
+        return;
+    block_unblock_async_io(1);
+    async_io_enabled = 0;
+}
+
+void initialize_async_io(void (*intr_func)(void))
+{
+    request_interrupt = intr_func;
+    async_io_enabled = 1;
+    disable_async_io();
+    signal(SIGIO, input_interrupt);
+}
+
+void remote_prepare(char *name)
+{
+    int ret;
+    char *port_str;
+    int port;
+    struct sockaddr_in addr;
+    char *port_end;
+    const int one = 1;
+    int listen_fd;
+
+    port_str = strchr(name, ':');
+    if (port_str == NULL)
+        return;
+    *port_str = '\0';
+
+    port = strtoul(port_str + 1, &port_end, 10);
+    if (port_str[1] == '\0' || *port_end != '\0')
+        printf("Bad port argument: %s", name);
+
+    listen_fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+    if (listen_fd < 0)
+    {
+        perror("socket() failed");
+        exit(-1);
+    }
+
+    ret = setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    if (ret < 0)
+    {
+        perror("setsockopt() failed");
+        exit(-1);
+    }
+
+    printf("Listening on port %d\n", port);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = *name ? inet_addr(name) : INADDR_ANY;
+    addr.sin_port = htons(port);
+
+    if (addr.sin_addr.s_addr == INADDR_NONE)
+    {
+        printf("Bad host argument: %s", name);
+        exit(-1);
+    }
+
+    ret = bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret < 0)
+    {
+        perror("bind() failed");
+        exit(-1);
+    }
+
+    ret = listen(listen_fd, 1);
+    if (ret < 0)
+    {
+        perror("listen() failed");
+        exit(-1);
+    }
+
+    sock_fd = accept(listen_fd, NULL, NULL);
+    if (sock_fd < 0)
+    {
+        perror("accept() failed");
+        exit(-1);
+    }
+
+    ret = setsockopt(sock_fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
+    ret = setsockopt(sock_fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    enable_async_notification(sock_fd);
+    close(listen_fd);
+    pktbuf_clear(&in);
+    pktbuf_clear(&out);
+}
+
+
+
+int gdb_signal_from_host (int hostsig)
+{
+  switch (hostsig)
+  {
+    case SIGHUP: return 1;
+    case SIGINT: return 2;
+    case SIGQUIT: return 3;
+    case SIGILL: return 4;
+    case SIGTRAP: return 5;
+    case SIGABRT: return 6;
+    // case SIGEMT: return 7;
+    case SIGFPE: return 8;
+    case SIGKILL: return 9;
+    case SIGBUS: return 10;
+    case SIGSEGV: return 11;
+    case SIGSYS: return 12;
+    case SIGPIPE: return 13;
+    case SIGALRM: return 14;
+    case SIGTERM: return 15;
+    case SIGURG: return 16;
+    case SIGSTOP: return 17;
+    case SIGTSTP: return 18;
+    case SIGCONT: return 19;
+    case SIGCHLD: return 20;
+    case SIGTTIN: return 21;
+    case SIGTTOU: return 22;
+    case SIGIO: return 23;
+    case SIGXCPU: return 24;
+    case SIGXFSZ: return 25;
+    case SIGVTALRM: return 26;
+    case SIGPROF: return 27;
+    case SIGWINCH: return 28;
+    // case SIGLOST: return 29;
+    case SIGUSR1: return 30;
+    case SIGUSR2: return 31;
+    case SIGPWR: return 32;
+    default: return 143; // GDB_SIGNAL_UNKNOWN
+  }
+}
+
+
 
 void sigint_pid()
 {
@@ -177,7 +856,7 @@ size_t init_tids(const pid_t pid)
 void prepare_resume_reply(uint8_t *buf, bool cont)
 {
   if (WIFEXITED(threads.curr->stat))
-    sprintf(buf, "W%02x", gdb_signal_from_host(WEXITSTATUS(threads.curr->stat)));
+    sprintf(buf, "W%02x", WEXITSTATUS(threads.curr->stat));
   if (WIFSTOPPED(threads.curr->stat))
   {
     if (cont)
