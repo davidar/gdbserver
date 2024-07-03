@@ -758,48 +758,6 @@ void remote_prepare(char *name)
 
 
 
-int gdb_signal_from_host (int hostsig)
-{
-  switch (hostsig)
-  {
-    case SIGHUP: return 1;
-    case SIGINT: return 2;
-    case SIGQUIT: return 3;
-    case SIGILL: return 4;
-    case SIGTRAP: return 5;
-    case SIGABRT: return 6;
-    // case SIGEMT: return 7;
-    case SIGFPE: return 8;
-    case SIGKILL: return 9;
-    case SIGBUS: return 10;
-    case SIGSEGV: return 11;
-    case SIGSYS: return 12;
-    case SIGPIPE: return 13;
-    case SIGALRM: return 14;
-    case SIGTERM: return 15;
-    case SIGURG: return 16;
-    case SIGSTOP: return 17;
-    case SIGTSTP: return 18;
-    case SIGCONT: return 19;
-    case SIGCHLD: return 20;
-    case SIGTTIN: return 21;
-    case SIGTTOU: return 22;
-    case SIGIO: return 23;
-    case SIGXCPU: return 24;
-    case SIGXFSZ: return 25;
-    case SIGVTALRM: return 26;
-    case SIGPROF: return 27;
-    case SIGWINCH: return 28;
-    // case SIGLOST: return 29;
-    case SIGUSR1: return 30;
-    case SIGUSR2: return 31;
-    case SIGPWR: return 32;
-    default: return 143; // GDB_SIGNAL_UNKNOWN
-  }
-}
-
-
-
 void sigint_pid()
 {
   kill(-threads.t[0].pid, SIGINT);
@@ -935,10 +893,8 @@ void prepare_resume_reply(uint8_t *buf, bool cont)
   {
     if (cont)
       stop_threads();
-    sprintf(buf, "T%02xthread:p%02x.%02x;", gdb_signal_from_host(WSTOPSIG(threads.curr->stat)), threads.curr->pid, threads.curr->tid);
+    sprintf(buf, "T%02xthread:p%02x.%02x;", WSTOPSIG(threads.curr->stat), threads.curr->pid, threads.curr->tid);
   }
-  // if (WIFSIGNALED(stat_loc))
-  //   sprintf(buf, "T%02x", gdb_signal_from_host(WTERMSIG(stat_loc)));
 }
 
 void read_auxv(void)
@@ -1286,6 +1242,9 @@ void process_packet()
     regs_struct regs;
     uint8_t regbuf[20];
     tmpbuf[0] = '\0';
+    int tid;
+    if (sscanf(payload, ";thread:%x;", &tid) == 1)
+      set_curr_thread(tid);
     ptrace(PTRACE_GETREGS, threads.curr->tid, NULL, &regs);
     for (int i = 0; i < ARCH_REG_NUM; i++)
     {
@@ -1352,12 +1311,10 @@ void process_packet()
   }
   case 'p':
   {
-    int i = strtol(payload, NULL, 16);
-    if (i == 0)
-    {
-      write_packet("");
-      break;
-    }
+    int i = strtol(payload, &payload, 16);
+    int tid;
+    if (sscanf(payload, ";thread:%x;", &tid) == 1)
+      set_curr_thread(tid);
     if (i >= ARCH_REG_NUM && i != EXTRA_NUM)
     {
       write_packet("E01");
@@ -1390,6 +1347,9 @@ void process_packet()
     }
     size_t regdata = 0;
     hex2mem(payload, (void *)&regdata, SZ * 2);
+    int tid;
+    if (sscanf(payload + SZ * 2, ";thread:%x;", &tid) == 1)
+      set_curr_thread(tid);
     if (i == EXTRA_NUM)
       ptrace(PTRACE_POKEUSER, threads.curr->tid, SZ * EXTRA_REG, regdata);
     else
@@ -1406,6 +1366,8 @@ void process_packet()
       NoAckMode = true;
       write_packet("OK");
     }
+    else if (!strcmp(payload, "ThreadSuffixSupported"))
+      write_packet("OK");
     else
       write_packet("");
     break;
@@ -1467,7 +1429,8 @@ void process_packet()
     break;
   }
   case '?':
-    write_packet("S05");
+    sprintf(tmpbuf, "T%02xthread:p%02x.%02x;", SIGSTOP, threads.curr->pid, threads.curr->tid);
+    write_packet(tmpbuf);
     break;
   default:
     write_packet("");
