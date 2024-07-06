@@ -2,3 +2,10 @@ BasedOnStyle: LLVM
 IndentWidth: 2
 ColumnLimit: 100
 AlignEscapedNewlines: DontAlign
+AllowShortCaseLabelsOnASingleLine: true
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
+  AlignCaseColons: false
+AllowShortIfStatementsOnASingleLine: true
