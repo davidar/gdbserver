@@ -266,7 +266,7 @@ static void input_interrupt(int unused) {
     uint8_t buf[4096];
     nread = read(sock_fd, buf, sizeof(buf));
     if(nread == 1 && buf[0] == INTERRUPT_CHAR) {
-    kill(-threads.t[0].pid, SIGINT);
+      kill(-threads.t[0].pid, SIGINT);
     } else {
       fprintf(stderr, "Ignoring unexpected packet: %s\n", buf);
     }
@@ -582,6 +582,11 @@ int main(int argc, char *argv[]) {
         exit(0);
       }
       pktbuf_insert(&in, buf, nread);
+    }
+    if (in.buf[0] == INTERRUPT_CHAR) {
+      fprintf(stderr, "Ignoring interrupt packet\n");
+      pktbuf_erase_head(&in, 1);
+      continue;
     }
     pktbuf_insert(&out, "+", 1);
 
