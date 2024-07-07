@@ -263,10 +263,13 @@ static bool async_io_enabled;
 static void input_interrupt(int unused) {
   if (async_io_enabled) {
     int nread;
-    char buf;
-    nread = read(sock_fd, &buf, 1);
-    assert(nread == 1 && buf == INTERRUPT_CHAR);
+    uint8_t buf[4096];
+    nread = read(sock_fd, buf, sizeof(buf));
+    if(nread == 1 && buf[0] == INTERRUPT_CHAR) {
     kill(-threads.t[0].pid, SIGINT);
+    } else {
+      fprintf(stderr, "Ignoring unexpected packet: %s\n", buf);
+    }
   }
 }
 
