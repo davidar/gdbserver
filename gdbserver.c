@@ -479,6 +479,9 @@ int main(int argc, char *argv[]) {
     threads.t[0].stat = stat;
     threads.len = 1;
     ptrace(PTRACE_SETOPTIONS, pid, NULL, PTRACE_O_TRACECLONE | PTRACE_O_EXITKILL);
+    int terminal_fd = fileno(stderr);
+    pid_t old_foreground_pgrp = tcgetpgrp(terminal_fd);
+    tcsetpgrp(terminal_fd, pid);
   }
   threads.curr = &threads.t[0];
 
